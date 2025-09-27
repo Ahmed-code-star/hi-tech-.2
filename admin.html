@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>لوحة تحكم - هاي تك</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
+</head>
+<body>
+  <header class="site-header"><div class="container"><h1>لوحة إدارة هاي تك</h1></div></header>
+  <main class="container admin-grid">
+    <section id="adminLogin">
+      <h2>تسجيل الدخول</h2>
+      <input id="adminEmail" placeholder="البريد الإلكتروني" />
+      <input id="adminPass" type="password" placeholder="كلمة المرور" />
+      <button id="adminLoginBtn">دخول</button>
+      <p id="loginMsg"></p>
+    </section>
+
+    <section id="adminPanel" style="display:none;">
+      <div class="top-row">
+        <div>
+          <h3>الإحصائيات</h3>
+          <p id="statOrders">الطلبات: 0</p>
+          <p id="statSales">المبيعات: 0</p>
+        </div>
+        <div>
+          <h3>معلومات المصنع</h3>
+          <p id="factoryInfo"></p>
+          <button id="editFactoryBtn">تعديل معلومات المصنع</button>
+        </div>
+      </div>
+
+      <div class="admin-sections">
+        <div class="admin-col">
+          <h3>الفئات</h3>
+          <form id="catForm"><input id="newCatName" placeholder="اسم الفئة" required/><button>إضافة</button></form>
+          <div id="catListAdmin"></div>
+        </div>
+
+        <div class="admin-col">
+          <h3>المنتجات</h3>
+          <form id="prodForm">
+            <input id="prodName" placeholder="اسم المنتج" required/>
+            <input id="prodPrice" type="number" placeholder="السعر" required/>
+            <select id="prodCategory"></select>
+            <input id="prodStock" type="number" placeholder="الكمية" value="100"/>
+            <input id="prodImages" type="file" multiple accept="image/*"/>
+            <button>إضافة منتج</button>
+          </form>
+          <div id="prodListAdmin"></div>
+        </div>
+      </div>
+
+      <h3>الطلبات</h3>
+      <div id="ordersAdmin"></div>
+
+      <button id="adminLogout">خروج</button>
+    </section>
+  </main>
+
+  <div id="editFactoryModal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3>تعديل معلومات المصنع</h3>
+      <input id="facName" placeholder="اسم المصنع"/>
+      <input id="facPhone" placeholder="الهاتف"/>
+      <input id="facWhats" placeholder="رابط واتساب"/>
+      <textarea id="facDesc" placeholder="نبذة عن المصنع"></textarea>
+      <button id="saveFactory">حفظ</button>
+      <button onclick="document.getElementById('editFactoryModal').style.display='none'">إغلاق</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+  <script>
+    initFirebase();
+
+    const ADMIN_EMAIL = 'vcfcdef780@gmail.com'; // restrict panel to this email
+    document.getElementById('adminLoginBtn').onclick = async ()=>{
+      const em = document.getElementById('adminEmail').value.trim();
+      const pw = document.getElementById('adminPass').value;
+      try{
+        const user = await adminLogin(em,pw);
+        if(user.email !== ADMIN_EMAIL) { document.getElementById('loginMsg').textContent='غير مصرح'; await auth.signOut(); return; }
+        document.getElementById('adminLogin').style.display='none';
+        document.getElementById('adminPanel').style.display='block';
+        startAdminListeners();
+      }catch(err){ document.getElementById('loginMsg').textContent = 'خطأ: '+err.message; }
+    };
+
+    document.getElementById('adminLogout').onclick = async ()=>{ await auth.signOut(); location.reload(); };
+
+    // categories
+    document.getElementById('catForm').onsubmit = async e=>{ e.preventDefault(); await adminAddCategory(document.getElementById('newCatName').value.trim()); document.getElementById('newCatName').value=''; await loadCategoriesAdmin(); await loadCategories(); };
+
+    // products
+    document.getElementById('prodForm').onsubmit = async e=>{ e.preventDefault(); const name = document.getElementById('prodName').value.trim(); const price = Number(document.getElementById('prodPrice').value||0); const cat = document.getElementById('prodCategory').value || null; const stock = Number(document.getElementById('prodStock').value||0); const files = document.getElementById('prodImages').files; await adminAddProduct({name_ar:name,price,category_id:cat,stock}, files); document.getElementById('prodForm').reset(); await loadProductsAdmin(); await loadProducts(); };
+
+    document.getElementById('editFactoryBtn').onclick = async ()=>{ const s = await getFactorySettings(); document.getElementById('facName').value = s.name || 'هاي تك'; document.getElementById('facPhone').value = s.phone || '01013055600'; document.getElementById('facWhats').value = s.whatsapp || 'https://wa.me/201013055600'; document.getElementById('facDesc').value = s.desc || ''; document.getElementById('editFactoryModal').style.display='block'; };
+
+    document.getElementById('saveFactory').onclick = async ()=>{ const obj = { name: document.getElementById('facName').value.trim(), phone: document.getElementById('facPhone').value.trim(), whatsapp: document.getElementById('facWhats').value.trim(), desc: document.getElementById('facDesc').value.trim() }; await saveFactorySettings(obj); document.getElementById('editFactoryModal').style.display='none'; loadFactoryInfo(); };
+
+    async function startAdminListeners(){ await loadCategoriesAdmin(); await loadProductsAdmin(); listenForOrders(onOrdersRealtime); loadFactoryInfo(); }
+
+    function onOrdersRealtime(orders){ const c = document.getElementById('ordersAdmin'); c.innerHTML=''; orders.forEach(o=>{ const d = document.createElement('div'); d.className='order'; d.innerHTML = `<p><b>الطلب:</b> ${o.id} <b>حالة:</b> ${o.status||'Pending'}</p><p><b>الاسم:</b> ${o.customer.name} - ${o.customer.phone}</p><p><b>العنوان:</b> ${o.customer.address}</p><p><b>الطريقة:</b> ${o.payment_method}</p><p><b>المجموع:</b> ${o.total_amount} ج.م</p>${o.payment_proof?`<p><a href="${o.payment_proof.url}" target="_blank">عرض صورة الدفع</a></p>`:''}<p><button onclick="updateOrderStatus('${o.id}','Processing')">تجهيز</button><button onclick="updateOrderStatus('${o.id}','Shipped')">شحن</button><button onclick="updateOrderStatus('${o.id}','Delivered')">تم التسليم</button><button onclick="updateOrderStatus('${o.id}','Cancelled')">إلغاء</button><button onclick="downloadOrderCSV('${o.id}')">تصدير CSV</button></p>`; c.appendChild(d); }); }
+
+    async function loadFactoryInfo(){ const s = await getFactorySettings(); document.getElementById('factoryInfo').innerHTML = `<b>${s.name||'هاي تك'}</b><br/>${s.phone||''}<br/><a href='${s.whatsapp||''}' target='_blank'>واتساب</a><br/>${s.desc||''}`; }
+  </script>
+</body>
+</html>
