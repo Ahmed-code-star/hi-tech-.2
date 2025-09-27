@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>هاي تك - متجر الورق الحراري واستيكرات الباركود</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-storage-compat.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-grid">
+      <div><h1>هاي تك</h1><p class="tag">متخصصون في الورق الحراري واستيكرات الباركود</p></div>
+      <div class="contact">هاتف: <b>01013055600</b><br/><a href="https://wa.me/201013055600" target="_blank">واتساب</a></div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="catalog">
+      <aside class="sidebar">
+        <h3>الفئات</h3>
+        <ul id="categoryList"></ul>
+        <button id="showAllBtn">عرض الكل</button>
+      </aside>
+
+      <section class="products">
+        <div class="toolbar">
+          <input id="searchInput" placeholder="ابحث عن منتج..." />
+          <div id="cartSummary">السلة: <span id="cartCount">0</span> منتج</div>
+        </div>
+        <div id="productsGrid" class="grid"></div>
+      </section>
+    </section>
+
+    <section id="cartPanel" class="panel" style="display:none;">
+      <h2>سلة الشراء</h2>
+      <div id="cartItems"></div>
+      <div class="cart-footer">
+        <div>المجموع: <span id="cartTotal">0</span> ج.م</div>
+        <button id="checkoutBtn">إتمام الطلب</button>
+      </div>
+    </section>
+
+    <section id="checkoutPanel" class="panel" style="display:none;">
+      <h2>إتمام الطلب</h2>
+      <form id="checkoutForm">
+        <input required id="c_name" placeholder="الاسم الكامل" />
+        <input required id="c_phone" placeholder="رقم الهاتف" />
+        <input required id="c_address" placeholder="العنوان التفصيلي" />
+        <select id="c_payment" required>
+          <option value="">اختر طريقة الدفع</option>
+          <option value="COD">الدفع عند الاستلام</option>
+          <option value="Instapay">إنستا باي</option>
+          <option value="Vodafone">فودافون كاش</option>
+        </select>
+        <div id="paymentExtra" style="display:none;">
+          <p>تحويل على الرقم: <strong>01025380065</strong></p>
+          <input type="file" id="c_proof" accept="image/*" />
+        </div>
+        <textarea id="c_notes" placeholder="ملاحظات للشحن (اختياري)"></textarea>
+        <button type="submit">تأكيد الطلب</button>
+        <button type="button" id="cancelCheckout">إلغاء</button>
+      </form>
+    </section>
+
+    <section id="confirmation" class="panel" style="display:none;">
+      <h2>تم إنشاء الطلب</h2>
+      <p id="orderMessage"></p>
+      <button id="backToShop">العودة للمتجر</button>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <p>مصنع هاي تك — هاتف: 01013055600 — <a href="https://wa.me/201013055600">واتساب</a></p>
+      <p>العنوان: القاهرة — نعرض منتجات الأوراق الحرارية واستيكرات الباركود</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+  <script>
+    initFirebase();
+    // UI wiring
+    document.getElementById('showAllBtn').onclick = ()=>{ loadProducts(); };
+    document.getElementById('searchInput').addEventListener('input', e=>{ loadProducts(e.target.value); });
+    document.getElementById('cartSummary').onclick = ()=>{ renderCart(); };
+    document.getElementById('checkoutBtn').onclick = ()=>{ document.getElementById('checkoutPanel').style.display='block'; document.getElementById('cartPanel').style.display='none'; };
+    document.getElementById('cancelCheckout').onclick = ()=>{ document.getElementById('checkoutPanel').style.display='none'; document.getElementById('cartPanel').style.display='block'; };
+    document.getElementById('backToShop').onclick = ()=>{ document.getElementById('confirmation').style.display='none'; loadProducts(); };
+
+    document.getElementById('c_payment').addEventListener('change', e=>{ document.getElementById('paymentExtra').style.display = (e.target.value === 'Instapay' || e.target.value==='Vodafone')?'block':'none'; });
+
+    document.getElementById('checkoutForm').addEventListener('submit', async e=>{
+      e.preventDefault();
+      if(!cart || cart.length===0){ alert('السلة فارغة'); return; }
+      const order = {
+        name: document.getElementById('c_name').value.trim(),
+        phone: document.getElementById('c_phone').value.trim(),
+        address: document.getElementById('c_address').value.trim(),
+        paymentMethod: document.getElementById('c_payment').value,
+        items: cart,
+        notes: document.getElementById('c_notes').value.trim(),
+        total: cart.reduce((s,i)=>s+(i.price||0)*i.qty,0)
+      };
+      const file = document.getElementById('c_proof').files[0];
+      try{
+        const res = await createOrder(order, file);
+        document.getElementById('checkoutPanel').style.display='none';
+        document.getElementById('confirmation').style.display='block';
+        document.getElementById('orderMessage').textContent = 'رقم الطلب: '+res.id;
+        sessionStorage.removeItem('hitech_cart');
+        cart = [];
+        renderCart();
+      }catch(err){
+        alert('خطأ: '+err.message);
+      }
+    });
+
+    // initial cart from session
+    const stored = sessionStorage.getItem('hitech_cart');
+    window.cart = stored ? JSON.parse(stored) : [];
+    renderCart();
+    loadCategories();
+    loadProducts();
+  </script>
+</body>
+</html>
